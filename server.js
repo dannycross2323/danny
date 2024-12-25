@@ -1,65 +1,39 @@
 const WebSocket = require('ws');
+const express = require('express');
+const app = express();
 
-// Create a WebSocket server on port 8080
-const wss = new WebSocket.Server({ port: 8080 });
+// Use Render's dynamic port or fallback to 8080 for local testing
+const PORT = process.env.PORT || 8080;
+const wss = new WebSocket.Server({ noServer: true });
 
-const rooms = {}; // Store rooms and their connected clients
+// Serve static files (e.g., for frontend)
+app.use(express.static('public'));
 
+// WebSocket connection handling
 wss.on('connection', (ws) => {
-  let currentRoom = null;
-
+  console.log('A new client connected!');
   ws.on('message', (message) => {
-    const data = JSON.parse(message);
-
-    if (data.type === 'join') {
-      currentRoom = data.room;
-      if (!rooms[currentRoom]) {
-        rooms[currentRoom] = { clients: [], messages: [] };
+    console.log('Received message:', message);
+    // Broadcast message to all connected clients
+    wss.clients.forEach((client) => {
+      if (client !== ws && client.readyState === WebSocket.OPEN) {
+        client.send(message);
       }
-
-      // Add user to the room
-      ws.username = data.username;
-      ws.color = data.color;
-      rooms[currentRoom].clients.push(ws);
-
-      // Send existing messages to the new user
-      rooms[currentRoom].messages.forEach((msg) => ws.send(JSON.stringify(msg)));
-
-      console.log(`${data.username} joined room: ${currentRoom}`);
-    }
-
-    if (data.type === 'message' && currentRoom) {
-      const messageData = {
-        type: 'message',
-        room: currentRoom,
-        username: data.username,
-        color: data.color,
-        message: data.message,
-        timestamp: data.timestamp
-      };
-
-      // Save message in room history
-      rooms[currentRoom].messages.push(messageData);
-
-      // Broadcast to all clients in the room
-      rooms[currentRoom].clients.forEach((client) => {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(JSON.stringify(messageData));
-        }
-      });
-    }
+    });
   });
 
   ws.on('close', () => {
-    if (currentRoom && rooms[currentRoom]) {
-      rooms[currentRoom].clients = rooms[currentRoom].clients.filter((client) => client !== ws);
-      if (rooms[currentRoom].clients.length === 0) {
-        delete rooms[currentRoom];
-      }
-    }
+    console.log('A client disconnected.');
   });
-
-  ws.onerror = (error) => console.error('WebSocket error:', error);
 });
 
-console.log('WebSocket server running on ws://localhost:8080');
+// Upgrade HTTP server to WebSocket server
+app.server = app.listen(PORT, () => {
+  console.log(`WebSocket server running on ws://localhost:${PORT}`);
+});
+
+app.server.on('upgrade', (request, socket, head) => {
+  wss.handleUpgrade(request, socket, head, (ws) => {
+    wss.emit('connection', ws, request);
+  });
+});
